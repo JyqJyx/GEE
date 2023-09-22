@@ -1,0 +1,72 @@
+var startDate = '2000-01-01';
+var endDate = '2021-12-31';
+var NIR= ee.ImageCollection("LANDSAT/LC08/C01/T1_TOA")
+  .filterDate(startDate, endDate)
+  .filterBounds(table)
+  .select("B5");
+var calculateMonthlyMean1 = function(year, month) {
+  var start = ee.Date.fromYMD(year, month, 1);
+  var end = start.advance(1, 'month');
+  var monthlyMean = NIR.filter(ee.Filter.date(start, end))
+                          .mean()
+                          .set('year', year)
+                          .set('month', month);
+  return monthlyMean;
+};
+var NIR_month = ee.ImageCollection.fromImages(
+  ee.List.sequence(2000, 2021).map(function(year) {
+    return ee.List.sequence(1, 12).map(function(month) {
+      return calculateMonthlyMean1(year, month);
+    });
+  }).flatten()
+);
+
+
+var SWIR= ee.ImageCollection("LANDSAT/LC08/C01/T1_TOA")
+  .filterDate(startDate, endDate)
+  .filterBounds(table)
+  .select("B6");
+var calculateMonthlyMean2 = function(year, month) {
+  var start = ee.Date.fromYMD(year, month, 1);
+  var end = start.advance(1, 'month');
+  var monthlyMean = SWIR.filter(ee.Filter.date(start, end))
+                          .mean()
+                          .set('year', year)
+                          .set('month', month);
+  return monthlyMean;
+};
+var SWIR_month = ee.ImageCollection.fromImages(
+  ee.List.sequence(2000, 2021).map(function(year) {
+    return ee.List.sequence(1, 12).map(function(month) {
+      return calculateMonthlyMean2(year, month);
+    });
+  }).flatten()
+);
+var calculateCNM = function(image) {
+    // 获取 NIR_month 对应的图像
+    var nirImage = image;
+    // 获取 SWIR_month 对应的图像，需要根据 nirImage 的 'year' 和 'month' 属性来筛选
+    var swirImage = SWIR_month
+        .filter(ee.Filter.eq('year', image.get('year')))
+        .filter(ee.Filter.eq('month', image.get('month')))
+        .first(); // 选择第一个匹配的图像
+    
+    var cnmImage = nirImage.subtract(swirImage).divide(nirImage.add(swirImage)).rename('CNM');
+    return cnmImage;
+};
+// 使用 map 函数将 calculateCNM 应用到每一层数据
+var CNMCollection = NIR_month.map(calculateCNM);
+
+// 打印结果
+print(CNMCollection);
+
+var exportParams = {
+  image:  CNMCollection,
+  description: 'NDMI',  // 导出影像的描述
+  region: table,  // 导出的区域范围
+  scale: 5000,  // 导出的分辨率（米）
+  crs: 'EPSG:4326'  // 导出的投影坐标系
+};
+
+// 启动导出任务
+Export.image.toDrive(exportParams)
